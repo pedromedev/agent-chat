@@ -1,0 +1,68 @@
+{
+  "name": "Agente Chat BHVR",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chat-agent",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-node",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "chat-agent-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extrair a mensagem do usuário\nconst message = $input.first().json.message;\nconst chatId = $input.first().json.chatId;\nconst timestamp = $input.first().json.timestamp;\n\n// Lógica simples de resposta (pode ser expandida com IA, APIs, etc.)\nlet response = \"Olá! Recebi sua mensagem.\";\n\nif (message.toLowerCase().includes('oi') || message.toLowerCase().includes('olá')) {\n  response = \"Olá! Como posso ajudá-lo hoje?\";\n} else if (message.toLowerCase().includes('ajuda')) {\n  response = \"Estou aqui para ajudar! Pode me fazer perguntas sobre produtos, serviços ou qualquer outra coisa.\";\n} else if (message.toLowerCase().includes('obrigado')) {\n  response = \"De nada! Fico feliz em ajudar. Tem mais alguma coisa que posso fazer por você?\";\n} else {\n  response = `Entendi sua mensagem: \"${message}\". Como posso ajudá-lo com isso?`;\n}\n\n// Retornar resposta estruturada\nreturn {\n  response: response,\n  message: response,\n  chatId: chatId,\n  timestamp: new Date().toISOString()\n};"
+      },
+      "id": "function-node",
+      "name": "Processar Mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "respond-node",
+      "name": "Responder",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Processar Mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Processar Mensagem": {
+      "main": [
+        [
+          {
+            "node": "Responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "versionId": "1"
+} 
