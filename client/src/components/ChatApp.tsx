@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useAuth } from '../contexts/AuthContext';
 import { Plus, MessageSquare, LogOut, Send, Paperclip, X, File, FileText, FileImage, FileVideo, FileAudio } from 'lucide-react';
 import type { ChatAgent, ChatMessage, CreateChatRequest, ChatAttachment } from 'shared/dist';
+import { api } from '../lib/api';
 
 interface ChatAppProps {}
 
@@ -39,8 +40,7 @@ export function ChatApp({}: ChatAppProps) {
 
   const loadChats = async () => {
     try {
-      const response = await fetch('/api/chat');
-      const data = await response.json();
+      const data = await api.get('/chat');
       if (data.success) {
         setChats(data.chats);
       }
@@ -51,8 +51,7 @@ export function ChatApp({}: ChatAppProps) {
 
   const loadMessages = async (chatId: string) => {
     try {
-      const response = await fetch(`/api/chat/${chatId}/messages`);
-      const data = await response.json();
+      const data = await api.get(`/chat/${chatId}/messages`);
       if (data.success) {
         setMessages(data.messages);
         // Scroll para a última mensagem após um pequeno delay
@@ -73,18 +72,11 @@ export function ChatApp({}: ChatAppProps) {
 
     try {
       setIsLoading(true);
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: newChatName,
-          webhookUrl: newChatWebhook,
-        } as CreateChatRequest),
-      });
+      const data = await api.post('/chat', {
+        name: newChatName,
+        webhookUrl: newChatWebhook,
+      } as CreateChatRequest);
 
-      const data = await response.json();
       if (data.success) {
         setChats([...chats, data.chat]);
         setSelectedChat(data.chat);
@@ -149,12 +141,8 @@ export function ChatApp({}: ChatAppProps) {
         formData.append(`attachments`, file);
       });
 
-      const response = await fetch(`/api/chat/${selectedChat.id}/messages`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      const data = await response.json();
+      const data = await api.postFormData(`/chat/${selectedChat.id}/messages`, formData);
+      
       if (data.success) {
         // Recarregar todas as mensagens para garantir que temos a resposta do agente
         await loadMessages(selectedChat.id);
