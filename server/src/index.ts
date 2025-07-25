@@ -325,32 +325,62 @@ export const app = new Hono()
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(webhookPayload),
-          // Adicionar timeout de 10 segundos
-          signal: AbortSignal.timeout(10000)
+          // Aumentar timeout para 30 segundos
+          signal: AbortSignal.timeout(30000)
         });
 
         if (webhookResponse.ok) {
-          const agentResponse = await webhookResponse.json() as any;
-          console.log('Resposta do agente:', agentResponse);
+          // Verificar o tamanho da resposta antes de processar
+          const contentLength = webhookResponse.headers.get('content-length');
+          const maxSize = 10 * 1024 * 1024; // 10MB
           
-          // Criar mensagem do agente
-          const agentMessage: ChatMessage = {
-            id: generateId(),
-            chatId,
-            content: agentResponse.response || agentResponse.message || agentResponse.output || "Resposta do agente",
-            sender: 'agent',
-            timestamp: new Date().toISOString()
-          };
+          if (contentLength && parseInt(contentLength) > maxSize) {
+            console.log('Resposta do webhook muito grande, ignorando');
+            const response: SendMessageResponse = {
+              success: true,
+              message: userMessage
+            };
+            return c.json(response, { status: 200 });
+          }
 
-          // Adicionar mensagem do agente
-          chatMessages.push(agentMessage);
-          messages.set(chatId, chatMessages);
+          try {
+            const agentResponse = await webhookResponse.json() as any;
+            console.log('Resposta do agente recebida');
+            
+            // Verificar se a resposta é muito grande
+            const responseText = JSON.stringify(agentResponse);
+            if (responseText.length > 50000) { // 50KB
+              console.log('Resposta do agente muito grande, truncando');
+              agentResponse.response = agentResponse.response?.substring(0, 1000) + '... (resposta truncada)';
+            }
+            
+            // Criar mensagem do agente
+            const agentMessage: ChatMessage = {
+              id: generateId(),
+              chatId,
+              content: agentResponse.response || agentResponse.message || agentResponse.output || "Resposta do agente",
+              sender: 'agent',
+              timestamp: new Date().toISOString()
+            };
 
-          const response: SendMessageResponse = {
-            success: true,
-            message: agentMessage
-          };
-          return c.json(response, { status: 200 });
+            // Adicionar mensagem do agente
+            chatMessages.push(agentMessage);
+            messages.set(chatId, chatMessages);
+
+            const response: SendMessageResponse = {
+              success: true,
+              message: agentMessage
+            };
+            return c.json(response, { status: 200 });
+          } catch (jsonError) {
+            console.error('Erro ao processar JSON da resposta:', jsonError);
+            // Se não conseguir processar o JSON, retornar apenas a mensagem do usuário
+            const response: SendMessageResponse = {
+              success: true,
+              message: userMessage
+            };
+            return c.json(response, { status: 200 });
+          }
         } else {
           console.log('Webhook falhou, status:', webhookResponse.status);
           // Se o webhook falhar, ainda retornamos a mensagem do usuário
@@ -364,9 +394,15 @@ export const app = new Hono()
     } catch (webhookError) {
       console.error('Erro no webhook:', webhookError);
       
-      // Verificar se é um erro de timeout
-      if (webhookError instanceof Error && webhookError.name === 'AbortError') {
-        console.log('Webhook timeout - não foi possível obter resposta em 10 segundos');
+      // Verificar diferentes tipos de erro
+      if (webhookError instanceof Error) {
+        if (webhookError.name === 'AbortError') {
+          console.log('Webhook timeout - não foi possível obter resposta em 30 segundos');
+        } else if (webhookError.name === 'TypeError') {
+          console.log('Erro de rede no webhook - verifique a URL');
+        } else {
+          console.log('Erro desconhecido no webhook:', webhookError.message);
+        }
       }
       
       // Se houver erro no webhook, ainda retornamos a mensagem do usuário

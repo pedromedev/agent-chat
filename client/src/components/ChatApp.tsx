@@ -22,6 +22,7 @@ export function ChatApp({}: ChatAppProps) {
   const [newChatWebhook, setNewChatWebhook] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isDocumentMode, setIsDocumentMode] = useState(false);
+  const [webhookError, setWebhookError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Carregar chats ao iniciar
@@ -140,6 +141,7 @@ export function ChatApp({}: ChatAppProps) {
 
     try {
       setIsLoading(true);
+      setWebhookError(null); // Limpar erro anterior
       
       const formData = new FormData();
       formData.append('content', newMessage);
@@ -172,6 +174,7 @@ export function ChatApp({}: ChatAppProps) {
       }
     } catch (error) {
       console.error('Erro ao enviar mensagem:', error);
+      setWebhookError('Erro ao enviar mensagem. Tente novamente.');
     } finally {
       setIsLoading(false);
     }
@@ -291,6 +294,13 @@ export function ChatApp({}: ChatAppProps) {
             <div className="bg-white border-b border-gray-200 p-4">
               <h2 className="text-lg font-medium text-gray-900">{selectedChat.name}</h2>
               <p className="text-sm text-gray-500">Webhook: {selectedChat.webhookUrl}</p>
+              {webhookError && (
+                <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded">
+                  <p className="text-xs text-yellow-700">
+                    ⚠️ {webhookError}
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Messages */}
@@ -307,7 +317,12 @@ export function ChatApp({}: ChatAppProps) {
                         : 'bg-gray-200 text-gray-900'
                     }`}
                   >
-                    <p className="text-sm">{message.content}</p>
+                    <p className="text-sm whitespace-pre-wrap break-words">
+                      {message.content.length > 2000 
+                        ? message.content.substring(0, 2000) + '... (mensagem truncada)'
+                        : message.content
+                      }
+                    </p>
                     
                     {/* Anexos */}
                     {message.attachments && message.attachments.length > 0 && (
