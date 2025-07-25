@@ -41,8 +41,35 @@ function generateId(): string {
   return Date.now().toString() + Math.random().toString(36).substr(2, 9);
 }
 
+// Função otimizada para converter ArrayBuffer para base64
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const len = bytes.byteLength;
+  
+  // Processar em chunks para evitar stack overflow
+  const chunkSize = 8192; // 8KB chunks
+  for (let i = 0; i < len; i += chunkSize) {
+    const chunk = bytes.slice(i, i + chunkSize);
+    binary += String.fromCharCode.apply(null, chunk as any);
+  }
+  
+  return btoa(binary);
+}
+
 export const app = new Hono()
-  .use(cors())
+  .use(cors({
+    origin: ['http://localhost:5173', 'https://e8ad6cddb694.ngrok-free.app', 'https://*.ngrok-free.app'],
+    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+  }))
+  // Configurar limite de tamanho da requisição
+  .use('*', async (c, next) => {
+    // Aumentar limite para 100MB
+    c.req.raw.headers.set('content-length', '104857600'); // 100MB em bytes
+    await next();
+  })
   .get("/", (c) => {
     return c.text("Hello Hono!");
   })
@@ -100,32 +127,32 @@ export const app = new Hono()
 })
 
 // Endpoint para verificar token
-.get("/auth/me", async (c) => {
-  const authHeader = c.req.header('Authorization');
-  
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  .get("/auth/me", async (c) => {
+    const authHeader = c.req.header('Authorization');
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      const error: AuthError = {
+        success: false,
+        message: "Token não fornecido"
+      };
+      return c.json(error, { status: 401 });
+    }
+
+    // Mock token validation
+    const token = authHeader.substring(7);
+    if (token.startsWith('mock-jwt-token-')) {
+      const userId = token.split('-').pop();
+      if (userId) {
+        const user = mockUsers.find(u => u.id === userId) || mockUsers[0];
+        return c.json({ success: true, user }, { status: 200 });
+      }
+    }
+
     const error: AuthError = {
       success: false,
-      message: "Token não fornecido"
+      message: "Token inválido"
     };
     return c.json(error, { status: 401 });
-  }
-
-  // Mock token validation
-  const token = authHeader.substring(7);
-  if (token.startsWith('mock-jwt-token-')) {
-    const userId = token.split('-').pop();
-    if (userId) {
-      const user = mockUsers.find(u => u.id === userId) || mockUsers[0];
-      return c.json({ success: true, user }, { status: 200 });
-    }
-  }
-
-  const error: AuthError = {
-    success: false,
-    message: "Token inválido"
-  };
-  return c.json(error, { status: 401 });
   })
   // Chat endpoints
   // Criar novo chat
@@ -196,63 +223,123 @@ export const app = new Hono()
   // Enviar mensagem para um chat
   .post("/chat/:chatId/messages", async (c) => {
   try {
+    console.log('=== INÍCIO DO PROCESSAMENTO DE MENSAGEM ===');
     const chatId = c.req.param('chatId');
+    console.log('Chat ID:', chatId);
     
     const chat = chats.get(chatId);
     if (!chat) {
+      console.log('Chat não encontrado:', chatId);
       return c.json({ 
         success: false, 
         error: "Chat não encontrado" 
       }, { status: 404 });
     }
+    console.log('Chat encontrado:', chat.name);
 
     // Verificar se é multipart/form-data ou JSON
     const contentType = c.req.header('Content-Type') || '';
+    console.log('Content-Type recebido:', contentType);
     let messageContent = '';
     let attachments: ChatAttachment[] = [];
 
-    if (contentType.includes('multipart/form-data')) {
-      // Processar upload de arquivos
-      const formData = await c.req.formData();
-      messageContent = formData.get('content') as string || '';
-      
-      // Processar anexos e converter para base64
-      const files = formData.getAll('attachments') as File[];
-      attachments = await Promise.all(files.map(async (file) => {
-        // Converter arquivo para base64
-        const arrayBuffer = await file.arrayBuffer();
-        const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+    try {
+      if (contentType.includes('multipart/form-data')) {
+        console.log('Processando multipart/form-data');
+        // Processar upload de arquivos
+        const formData = await c.req.formData();
+        messageContent = formData.get('content') as string || '';
+        console.log('Conteúdo da mensagem:', messageContent);
         
-        return {
-          id: generateId(),
-          name: file.name,
-          url: `uploads/${chatId}/${file.name}`, // URL simulada para exibição
-          type: file.type,
-          size: file.size,
-          base64: base64 // Adicionar base64 para envio ao n8n
-        };
-      }));
-    } else {
-      // Processar JSON normal
-      const body = await c.req.json() as SendMessageRequest;
-      messageContent = body.content || '';
-      // Converter File[] para ChatAttachment[] se necessário
-      if (body.attachments) {
-        attachments = await Promise.all(body.attachments.map(async (file) => {
-          // Converter arquivo para base64
-          const arrayBuffer = await file.arrayBuffer();
-          const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
-          
-          return {
-            id: generateId(),
-            name: file.name,
-            url: `uploads/${chatId}/${file.name}`,
-            type: file.type,
-            size: file.size,
-            base64: base64 // Adicionar base64 para envio ao n8n
-          };
+        // Processar anexos e converter para base64
+        const files = formData.getAll('attachments') as File[];
+        console.log('Número de arquivos recebidos:', files.length);
+        
+        attachments = await Promise.all(files.map(async (file, index) => {
+          console.log(`Processando arquivo ${index + 1}:`, file.name, file.size, file.type);
+          console.log(`Tamanho do arquivo: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
+          console.log(`Progresso: ${index + 1}/${files.length} arquivos`);
+          try {
+            // Verificar tamanho do arquivo (máximo 100MB)
+            const maxSize = 100 * 1024 * 1024; // 100MB
+            if (file.size > maxSize) {
+              throw new Error(`Arquivo muito grande: ${file.name} (${file.size} bytes). Máximo permitido: ${maxSize} bytes`);
+            }
+            
+            // Para arquivos muito grandes (> 50MB), não converter para base64
+            const veryLargeSize = 50 * 1024 * 1024; // 50MB
+            let base64 = '';
+            
+            if (file.size > veryLargeSize) {
+              console.log('Arquivo muito grande, pulando conversão para base64');
+              console.log(`⚠️ Arquivo ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB) é muito grande para conversão completa`);
+              base64 = ''; // Não converter para base64
+            } else {
+              // Converter arquivo para base64
+              console.log('Iniciando conversão para base64...');
+              const arrayBuffer = await file.arrayBuffer();
+              console.log('ArrayBuffer criado, convertendo para base64...');
+              base64 = arrayBufferToBase64(arrayBuffer);
+              console.log('Base64 criado com sucesso');
+            }
+            
+            return {
+              id: generateId(),
+              name: file.name,
+              url: `uploads/${chatId}/${file.name}`, // URL simulada para exibição
+              type: file.type,
+              size: file.size,
+              base64: base64 // Adicionar base64 para envio ao n8n
+            };
+          } catch (error) {
+            console.error('Erro ao processar arquivo:', file.name, error);
+            throw error;
+          }
         }));
+      } else {
+        console.log('Processando JSON normal');
+        // Processar JSON normal
+        const body = await c.req.json() as SendMessageRequest;
+        messageContent = body.content || '';
+        // Converter File[] para ChatAttachment[] se necessário
+        if (body.attachments) {
+          attachments = await Promise.all(body.attachments.map(async (file) => {
+            // Verificar tamanho do arquivo (máximo 100MB)
+            const maxSize = 100 * 1024 * 1024; // 100MB
+            if (file.size > maxSize) {
+              throw new Error(`Arquivo muito grande: ${file.name} (${file.size} bytes). Máximo permitido: ${maxSize} bytes`);
+            }
+            
+            // Para arquivos muito grandes (> 50MB), não converter para base64
+            const veryLargeSize = 50 * 1024 * 1024; // 50MB
+            let base64 = '';
+            
+            if (file.size > veryLargeSize) {
+              console.log('Arquivo muito grande, pulando conversão para base64');
+              base64 = ''; // Não converter para base64
+            } else {
+              // Converter arquivo para base64
+              const arrayBuffer = await file.arrayBuffer();
+              base64 = arrayBufferToBase64(arrayBuffer);
+            }
+            
+            return {
+              id: generateId(),
+              name: file.name,
+              url: `uploads/${chatId}/${file.name}`,
+              type: file.type,
+              size: file.size,
+              base64: base64 // Adicionar base64 para envio ao n8n
+            };
+          }));
+        }
       }
+    } catch (processError) {
+      console.error('Erro ao processar dados da requisição:', processError);
+      return c.json({ 
+        success: false, 
+        error: `Erro ao processar dados: ${processError instanceof Error ? processError.message : 'Erro desconhecido'}` 
+      }, { status: 400 });
     }
     
     if (!messageContent && attachments.length === 0) {
@@ -413,6 +500,7 @@ export const app = new Hono()
       return c.json(response, { status: 200 });
     }
   } catch (error) {
+    console.error('=== ERRO GERAL NO PROCESSAMENTO ===', error);
     return c.json({ 
       success: false, 
       error: "Erro interno do servidor" 

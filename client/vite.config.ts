@@ -12,7 +12,7 @@ export default defineConfig({
     },
   },
   server: {
-    allowedHosts: ['b2bbfff54f8e.ngrok.app', 'e8ad6cddb694.ngrok-free.app'],
+    allowedHosts: ['b2bbfff54f8e.ngrok.app'],
     proxy: {
       '/api': {
         target: 'http://localhost:3000',
@@ -20,12 +20,5 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
     },
-  },
-  // Configuração para produção
-  define: {
-    __API_BASE_URL__: JSON.stringify(process.env.NODE_ENV === 'production' 
-      ? 'https://e8ad6cddb694.ngrok-free.app' 
-      : 'http://localhost:3000'
-    ),
   },
 })

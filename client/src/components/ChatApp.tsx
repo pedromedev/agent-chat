@@ -7,7 +7,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useAuth } from '../contexts/AuthContext';
 import { Plus, MessageSquare, LogOut, Send, Paperclip, X, File, FileText, FileImage, FileVideo, FileAudio } from 'lucide-react';
 import type { ChatAgent, ChatMessage, CreateChatRequest, ChatAttachment } from 'shared/dist';
-import { api } from '../lib/api';
 
 interface ChatAppProps {}
 
@@ -40,7 +39,8 @@ export function ChatApp({}: ChatAppProps) {
 
   const loadChats = async () => {
     try {
-      const data = await api.get('/chat');
+      const response = await fetch('/api/chat');
+      const data = await response.json();
       if (data.success) {
         setChats(data.chats);
       }
@@ -51,7 +51,8 @@ export function ChatApp({}: ChatAppProps) {
 
   const loadMessages = async (chatId: string) => {
     try {
-      const data = await api.get(`/chat/${chatId}/messages`);
+      const response = await fetch(`/api/chat/${chatId}/messages`);
+      const data = await response.json();
       if (data.success) {
         setMessages(data.messages);
         // Scroll para a última mensagem após um pequeno delay
@@ -72,11 +73,18 @@ export function ChatApp({}: ChatAppProps) {
 
     try {
       setIsLoading(true);
-      const data = await api.post('/chat', {
-        name: newChatName,
-        webhookUrl: newChatWebhook,
-      } as CreateChatRequest);
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: newChatName,
+          webhookUrl: newChatWebhook,
+        } as CreateChatRequest),
+      });
 
+      const data = await response.json();
       if (data.success) {
         setChats([...chats, data.chat]);
         setSelectedChat(data.chat);
@@ -135,13 +143,28 @@ export function ChatApp({}: ChatAppProps) {
       setIsLoading(true);
       setWebhookError(null); // Limpar erro anterior
       
+      console.log('Enviando mensagem com arquivos:', selectedFiles.length);
+      selectedFiles.forEach((file, index) => {
+        console.log(`Arquivo ${index + 1}:`, file.name, file.size, file.type);
+      });
+      
       const formData = new FormData();
       formData.append('content', newMessage);
       selectedFiles.forEach((file, index) => {
         formData.append(`attachments`, file);
       });
 
-      const data = await api.postFormData(`/chat/${selectedChat.id}/messages`, formData);
+      console.log('Fazendo requisição para:', `/api/chat/${selectedChat.id}/messages`);
+      const response = await fetch(`/api/chat/${selectedChat.id}/messages`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      console.log('Status da resposta:', response.status);
+      console.log('Headers da resposta:', Object.fromEntries(response.headers.entries()));
+
+      const data = await response.json();
+      console.log('Dados da resposta:', data);
       
       if (data.success) {
         // Recarregar todas as mensagens para garantir que temos a resposta do agente
@@ -159,6 +182,9 @@ export function ChatApp({}: ChatAppProps) {
         if (selectedFiles.length > 0) {
           console.log(`✅ Arquivo enviado com sucesso`);
         }
+      } else {
+        console.error('Erro na resposta:', data.error);
+        setWebhookError(data.error || 'Erro ao enviar mensagem');
       }
     } catch (error) {
       console.error('Erro ao enviar mensagem:', error);
