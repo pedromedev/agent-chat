@@ -12,7 +12,8 @@ import type {
   SendMessageRequest,
   SendMessageResponse,
   ChatListResponse,
-  ChatMessagesResponse
+  ChatMessagesResponse,
+  ChatAttachment
 } from "shared/dist";
 
 // Mock user database
@@ -196,15 +197,7 @@ export const app = new Hono()
   .post("/chat/:chatId/messages", async (c) => {
   try {
     const chatId = c.req.param('chatId');
-    const body = await c.req.json() as SendMessageRequest;
     
-    if (!body.content) {
-      return c.json({ 
-        success: false, 
-        error: "Conteúdo da mensagem é obrigatório" 
-      }, { status: 400 });
-    }
-
     const chat = chats.get(chatId);
     if (!chat) {
       return c.json({ 
@@ -213,13 +206,70 @@ export const app = new Hono()
       }, { status: 404 });
     }
 
+    // Verificar se é multipart/form-data ou JSON
+    const contentType = c.req.header('Content-Type') || '';
+    let messageContent = '';
+    let attachments: ChatAttachment[] = [];
+
+    if (contentType.includes('multipart/form-data')) {
+      // Processar upload de arquivos
+      const formData = await c.req.formData();
+      messageContent = formData.get('content') as string || '';
+      
+      // Processar anexos e converter para base64
+      const files = formData.getAll('attachments') as File[];
+      attachments = await Promise.all(files.map(async (file) => {
+        // Converter arquivo para base64
+        const arrayBuffer = await file.arrayBuffer();
+        const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+        
+        return {
+          id: generateId(),
+          name: file.name,
+          url: `uploads/${chatId}/${file.name}`, // URL simulada para exibição
+          type: file.type,
+          size: file.size,
+          base64: base64 // Adicionar base64 para envio ao n8n
+        };
+      }));
+    } else {
+      // Processar JSON normal
+      const body = await c.req.json() as SendMessageRequest;
+      messageContent = body.content || '';
+      // Converter File[] para ChatAttachment[] se necessário
+      if (body.attachments) {
+        attachments = await Promise.all(body.attachments.map(async (file) => {
+          // Converter arquivo para base64
+          const arrayBuffer = await file.arrayBuffer();
+          const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+          
+          return {
+            id: generateId(),
+            name: file.name,
+            url: `uploads/${chatId}/${file.name}`,
+            type: file.type,
+            size: file.size,
+            base64: base64 // Adicionar base64 para envio ao n8n
+          };
+        }));
+      }
+    }
+    
+    if (!messageContent && attachments.length === 0) {
+      return c.json({ 
+        success: false, 
+        error: "Conteúdo da mensagem ou anexos são obrigatórios" 
+      }, { status: 400 });
+    }
+
     // Criar mensagem do usuário
     const userMessage: ChatMessage = {
       id: generateId(),
       chatId,
-      content: body.content,
+      content: messageContent || (attachments.length > 0 ? `Enviou ${attachments.length} documento(s)` : ''),
       sender: 'user',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      attachments: attachments.length > 0 ? attachments : undefined
     };
 
     // Adicionar mensagem do usuário
@@ -233,20 +283,53 @@ export const app = new Hono()
 
     // Enviar mensagem para o webhook do agente
     try {
-      const webhookResponse = await fetch(chat.webhookUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          chatId,
-          message: body.content,
-          timestamp: userMessage.timestamp,
-          messageId: userMessage.id
-        })
-      });
+      // Criar payload para webhook com base64 dos anexos
+      const webhookPayload = {
+        chatId,
+        message: messageContent,
+        timestamp: userMessage.timestamp,
+        messageId: userMessage.id,
+        attachments: attachments.map(attachment => ({
+          id: attachment.id,
+          name: attachment.name,
+          type: attachment.type,
+          size: attachment.size,
+          base64: (attachment as any).base64 || ''
+        }))
+      };
 
-              if (webhookResponse.ok) {
+      // Se temos anexos, não esperamos resposta do webhook
+      if (attachments.length > 0) {
+        // Enviar webhook de forma assíncrona sem esperar resposta
+        fetch(chat.webhookUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(webhookPayload)
+        }).catch(error => {
+          console.error('Erro ao enviar webhook com anexos:', error);
+        });
+
+        // Retornar apenas a mensagem do usuário quando há anexos
+        const response: SendMessageResponse = {
+          success: true,
+          message: userMessage
+        };
+        return c.json(response, { status: 200 });
+      } else {
+        // Para mensagens sem anexos, tentar obter resposta do webhook
+        const webhookResponse = await fetch(chat.webhookUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(webhookPayload),
+          // Adicionar timeout de 10 segundos
+          signal: AbortSignal.timeout(10000)
+        });
+
+        if (webhookResponse.ok) {
           const agentResponse = await webhookResponse.json() as any;
           console.log('Resposta do agente:', agentResponse);
           
@@ -259,26 +342,33 @@ export const app = new Hono()
             timestamp: new Date().toISOString()
           };
 
-        // Adicionar mensagem do agente
-        chatMessages.push(agentMessage);
-        messages.set(chatId, chatMessages);
+          // Adicionar mensagem do agente
+          chatMessages.push(agentMessage);
+          messages.set(chatId, chatMessages);
 
-        const response: SendMessageResponse = {
-          success: true,
-          message: agentMessage
-        };
-        return c.json(response, { status: 200 });
-      } else {
-        console.log('Webhook falhou, status:', webhookResponse.status);
-        // Se o webhook falhar, ainda retornamos a mensagem do usuário
-        const response: SendMessageResponse = {
-          success: true,
-          message: userMessage
-        };
-        return c.json(response, { status: 200 });
+          const response: SendMessageResponse = {
+            success: true,
+            message: agentMessage
+          };
+          return c.json(response, { status: 200 });
+        } else {
+          console.log('Webhook falhou, status:', webhookResponse.status);
+          // Se o webhook falhar, ainda retornamos a mensagem do usuário
+          const response: SendMessageResponse = {
+            success: true,
+            message: userMessage
+          };
+          return c.json(response, { status: 200 });
+        }
       }
     } catch (webhookError) {
       console.error('Erro no webhook:', webhookError);
+      
+      // Verificar se é um erro de timeout
+      if (webhookError instanceof Error && webhookError.name === 'AbortError') {
+        console.log('Webhook timeout - não foi possível obter resposta em 10 segundos');
+      }
+      
       // Se houver erro no webhook, ainda retornamos a mensagem do usuário
       const response: SendMessageResponse = {
         success: true,

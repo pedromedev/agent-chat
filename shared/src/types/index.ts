@@ -50,6 +50,7 @@ export interface ChatAttachment {
   url: string;
   type: string;
   size: number;
+  base64?: string; // Conteúdo do arquivo em base64 para envio ao n8n
 }
 
 export interface CreateChatRequest {

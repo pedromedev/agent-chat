@@ -1,12 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, MessageSquare, LogOut, Send, Paperclip } from 'lucide-react';
-import type { ChatAgent, ChatMessage, CreateChatRequest } from 'shared/dist';
+import { Plus, MessageSquare, LogOut, Send, Paperclip, X, File, FileText, FileImage, FileVideo, FileAudio } from 'lucide-react';
+import type { ChatAgent, ChatMessage, CreateChatRequest, ChatAttachment } from 'shared/dist';
 
 interface ChatAppProps {}
 
@@ -20,6 +20,9 @@ export function ChatApp({}: ChatAppProps) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [newChatName, setNewChatName] = useState('');
   const [newChatWebhook, setNewChatWebhook] = useState('');
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [isDocumentMode, setIsDocumentMode] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Carregar chats ao iniciar
   useEffect(() => {
@@ -95,19 +98,58 @@ export function ChatApp({}: ChatAppProps) {
     }
   };
 
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    // Permitir apenas um arquivo por vez
+    if (files.length > 0) {
+      setSelectedFiles([files[0]]); // Apenas o primeiro arquivo
+      setIsDocumentMode(true);
+      setNewMessage(''); // Limpar texto quando anexar documentos
+    }
+    
+    // Limpar o input para permitir anexar o mesmo arquivo novamente
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setSelectedFiles([]); // Remover todos os arquivos
+    setIsDocumentMode(false);
+  };
+
+  const getFileIcon = (file: File) => {
+    const type = file.type;
+    if (type.startsWith('image/')) return <FileImage className="h-4 w-4" />;
+    if (type.startsWith('video/')) return <FileVideo className="h-4 w-4" />;
+    if (type.startsWith('audio/')) return <FileAudio className="h-4 w-4" />;
+    if (type.includes('pdf') || type.includes('document')) return <FileText className="h-4 w-4" />;
+    return <File className="h-4 w-4" />;
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
   const sendMessage = async () => {
-    if (!newMessage.trim() || !selectedChat) return;
+    if ((!newMessage.trim() && selectedFiles.length === 0) || !selectedChat) return;
 
     try {
       setIsLoading(true);
+      
+      const formData = new FormData();
+      formData.append('content', newMessage);
+      selectedFiles.forEach((file, index) => {
+        formData.append(`attachments`, file);
+      });
+
       const response = await fetch(`/api/chat/${selectedChat.id}/messages`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          content: newMessage,
-        }),
+        body: formData,
       });
 
       const data = await response.json();
@@ -115,6 +157,18 @@ export function ChatApp({}: ChatAppProps) {
         // Recarregar todas as mensagens para garantir que temos a resposta do agente
         await loadMessages(selectedChat.id);
         setNewMessage('');
+        setSelectedFiles([]);
+        setIsDocumentMode(false);
+        
+        // Limpar o input de arquivo após enviar
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+        
+        // Mostrar feedback se foram enviados arquivos
+        if (selectedFiles.length > 0) {
+          console.log(`✅ Arquivo enviado com sucesso`);
+        }
       }
     } catch (error) {
       console.error('Erro ao enviar mensagem:', error);
@@ -254,6 +308,45 @@ export function ChatApp({}: ChatAppProps) {
                     }`}
                   >
                     <p className="text-sm">{message.content}</p>
+                    
+                    {/* Anexos */}
+                    {message.attachments && message.attachments.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {message.attachments.map((attachment) => (
+                          <div
+                            key={attachment.id}
+                            className={`flex items-center space-x-2 p-2 rounded ${
+                              message.sender === 'user'
+                                ? 'bg-blue-500 text-white'
+                                : 'bg-gray-100 text-gray-700'
+                            }`}
+                          >
+                            {getFileIcon({ type: attachment.type } as File)}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium truncate">
+                                {attachment.name}
+                              </p>
+                              <p className="text-xs opacity-75">
+                                {formatFileSize(attachment.size)}
+                              </p>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => window.open(attachment.url, '_blank')}
+                              className={`text-xs ${
+                                message.sender === 'user'
+                                  ? 'text-blue-100 hover:text-white'
+                                  : 'text-gray-500 hover:text-gray-700'
+                              }`}
+                            >
+                              Abrir
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    
                     <p className={`text-xs mt-1 ${
                       message.sender === 'user' ? 'text-blue-100' : 'text-gray-500'
                     }`}>
@@ -266,23 +359,97 @@ export function ChatApp({}: ChatAppProps) {
 
             {/* Message Input */}
             <div className="bg-white border-t border-gray-200 p-4">
+              {/* File Attachments Preview */}
+              {selectedFiles.length > 0 && (
+                <div className="mb-3 p-3 bg-gray-50 rounded-lg">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-gray-700">
+                      Documento anexado
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedFiles([]);
+                        setIsDocumentMode(false);
+                      }}
+                      className="text-red-500 hover:text-red-700"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="space-y-2">
+                    {selectedFiles.map((file, index) => (
+                      <div key={index} className="flex items-center justify-between p-2 bg-white rounded border">
+                        <div className="flex items-center space-x-2">
+                          {getFileIcon(file)}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900 truncate">
+                              {file.name}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {formatFileSize(file.size)}
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeFile(index)}
+                          className="text-red-500 hover:text-red-700"
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="flex space-x-2">
                 <Input
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-                  placeholder="Digite sua mensagem..."
-                  disabled={isLoading}
+                  placeholder={isDocumentMode ? "Modo documento ativo - apenas um arquivo permitido" : "Digite sua mensagem..."}
+                  disabled={isLoading || isDocumentMode}
+                  className={isDocumentMode ? "bg-gray-100 text-gray-500" : ""}
                 />
+                
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                  accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png,.gif,.mp4,.mp3,.wav"
+                />
+                
+                <Button
+                  variant="outline"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isLoading}
+                  className="flex items-center space-x-2"
+                >
+                  <Paperclip className="h-4 w-4" />
+                </Button>
+                
                 <Button
                   onClick={sendMessage}
-                  disabled={!newMessage.trim() || isLoading}
+                  disabled={(!newMessage.trim() && selectedFiles.length === 0) || isLoading}
                   className="flex items-center space-x-2"
                 >
                   <Send className="h-4 w-4" />
                   <span>Enviar</span>
                 </Button>
               </div>
+              
+              {isDocumentMode && (
+                <div className="mt-2 p-2 bg-blue-50 rounded-lg">
+                  <p className="text-xs text-blue-700">
+                    📎 Modo documento ativo
+                  </p>
+                </div>
+              )}
             </div>
           </>
         ) : (
