@@ -553,7 +553,7 @@ export default app;
 
 // Start server if this file is run directly
 if (import.meta.main) {
-  const port = parseInt(process.argv[2] || '3001');
+  const port = parseInt(process.argv[2] || '3000');
   console.log(`🚀 Server running on http://localhost:${port}`);
   
   Bun.serve({
