@@ -36,7 +36,7 @@ bun run dev
 ```
 
 Isso iniciará:
-- Servidor backend na porta 3000
+- Servidor backend na porta 3001
 - Cliente frontend na porta 5173
 - Compilação TypeScript em modo watch
 
