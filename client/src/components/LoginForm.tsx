@@ -38,11 +38,8 @@ export function LoginForm() {
     <Card className="w-full max-w-md">
       <CardHeader className="space-y-1">
         <CardTitle className="text-2xl font-bold text-center">
-          Login BHVR
+          Login
         </CardTitle>
-        <CardDescription className="text-center">
-          Entre com suas credenciais para acessar o dashboard
-        </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -86,9 +83,7 @@ export function LoginForm() {
         </form>
 
         <div className="mt-4 text-sm text-muted-foreground text-center">
-          <p>Credenciais de teste:</p>
-          <p><strong>Email:</strong> qualquer email válido</p>
-          <p><strong>Senha:</strong> qualquer senha</p>
+          <p>Credenciais de teste!</p>
         </div>
       </CardContent>
     </Card>

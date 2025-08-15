@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { useAuth } from '../contexts/AuthContext';
 import { Plus, MessageSquare, LogOut, Send, Paperclip, X, File, FileText, FileImage, FileVideo, FileAudio } from 'lucide-react';
-import type { ChatAgent, ChatMessage, CreateChatRequest, ChatAttachment } from 'shared/dist';
+import type { ChatAgent, ChatMessage, CreateChatRequest } from 'shared/dist';
+import PVTLogo from '../assets/PVT-p.svg';
 
 interface ChatAppProps {}
 
@@ -208,7 +208,7 @@ export function ChatApp({}: ChatAppProps) {
         {/* Header */}
         <div className="p-4 border-b border-gray-200">
           <div className="flex items-center justify-between">
-            <h1 className="text-xl font-semibold text-gray-900">Chat BHVR</h1>
+            <img src={PVTLogo} alt="PVT Logo" className="h-6" />
             <Button
               variant="outline"
               size="sm"
@@ -219,7 +219,7 @@ export function ChatApp({}: ChatAppProps) {
               <span>Sair</span>
             </Button>
           </div>
-          <p className="text-sm text-gray-500 mt-1">Bem-vindo, {user?.name}</p>
+          <p className="text-sm text-gray-500 mt-1">Bem-vindo Sobral!</p>
         </div>
 
         {/* Chat List */}
