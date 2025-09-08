@@ -79,3 +79,26 @@ export interface ChatMessagesResponse {
   success: boolean;
   messages: ChatMessage[];
 }
+
+
+/* Agente RAG */
+export type RagRequest =
+  | {
+      question: string;
+      collection: string;
+      use_vector_store?: boolean;
+      session_id?: string;
+    }
+  | {
+      question: string;
+      collections: string[];
+      use_vector_store?: boolean;
+      session_id?: string;
+    };
+
+export type RagResponse = {
+  answer: string;
+  context_ids: string[];
+  collection: string | null;
+  session_id: string;
+};

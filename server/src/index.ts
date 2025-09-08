@@ -59,7 +59,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 
 export const app = new Hono()
   .use(cors({
-    origin: ['http://localhost:5173', 'https://e8ad6cddb694.ngrok-free.app', 'https://*.ngrok-free.app'],
+    origin: ['http://localhost:5173', 'https://e8ad6cddb694.ngrok-free.app', 'https://localhost:8000/*'],
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
     credentials: true,

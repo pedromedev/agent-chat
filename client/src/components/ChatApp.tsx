@@ -1,33 +1,34 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, MessageSquare, LogOut, Send, Paperclip, X, File, FileText, FileImage, FileVideo, FileAudio } from 'lucide-react';
-import type { ChatAgent, ChatMessage, CreateChatRequest } from 'shared/dist';
+import { MessageSquare, LogOut, Send, Paperclip, X, File, FileText, FileImage, FileVideo, FileAudio } from 'lucide-react';
+import type { ChatAgent, ChatMessage } from 'shared/dist';
 import PVTLogo from '../assets/PVT-p.svg';
+import { sendRagMessage, getApiBaseUrl, getApiPrefixRuntime, listCollections, createCollection, deleteCollection } from '../lib/api';
 
 interface ChatAppProps {}
 
 export function ChatApp({}: ChatAppProps) {
-  const { user, logout } = useAuth();
+  const { logout } = useAuth();
   const [chats, setChats] = useState<ChatAgent[]>([]);
   const [selectedChat, setSelectedChat] = useState<ChatAgent | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [newChatName, setNewChatName] = useState('');
-  const [newChatWebhook, setNewChatWebhook] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isDocumentMode, setIsDocumentMode] = useState(false);
   const [webhookError, setWebhookError] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [collections, setCollections] = useState<string[]>([]);
+  const [newCollection, setNewCollection] = useState('');
 
-  // Carregar chats ao iniciar
+  
+  // Carregar chat RAG fixo ao iniciar
   useEffect(() => {
     loadChats();
+    loadCollectionsUI();
   }, []);
 
   // Carregar mensagens quando um chat for selecionado
@@ -38,66 +39,64 @@ export function ChatApp({}: ChatAppProps) {
   }, [selectedChat]);
 
   const loadChats = async () => {
-    try {
-      const response = await fetch('/api/chat');
-      const data = await response.json();
-      if (data.success) {
-        setChats(data.chats);
+    const endpoint = `${getApiBaseUrl()}${getApiPrefixRuntime()}/agents/rag`;
+    const ragChat: ChatAgent = {
+      id: 'rag',
+      name: 'Agente RAG',
+      webhookUrl: endpoint,
+      createdAt: new Date().toISOString(),
+    };
+    setChats([ragChat]);
+    setSelectedChat(ragChat);
+  };
+
+  const loadMessages = async (_chatId: string) => {
+    setMessages([]);
+    setTimeout(() => {
+      const messagesContainer = document.querySelector('.messages-container');
+      if (messagesContainer) {
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
       }
-    } catch (error) {
-      console.error('Erro ao carregar chats:', error);
+    }, 100);
+  };
+
+  const loadCollectionsUI = async () => {
+    try {
+      const cols = await listCollections();
+      setCollections(cols);
+    } catch (err) {
+      console.error('Erro ao listar coleções:', err);
     }
   };
 
-  const loadMessages = async (chatId: string) => {
-    try {
-      const response = await fetch(`/api/chat/${chatId}/messages`);
-      const data = await response.json();
-      if (data.success) {
-        setMessages(data.messages);
-        // Scroll para a última mensagem após um pequeno delay
-        setTimeout(() => {
-          const messagesContainer = document.querySelector('.messages-container');
-          if (messagesContainer) {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-          }
-        }, 100);
-      }
-    } catch (error) {
-      console.error('Erro ao carregar mensagens:', error);
-    }
-  };
-
-  const createChat = async () => {
-    if (!newChatName || !newChatWebhook) return;
-
+  const handleCreateCollection = async () => {
+    const name = newCollection.trim();
+    if (!name) return;
     try {
       setIsLoading(true);
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: newChatName,
-          webhookUrl: newChatWebhook,
-        } as CreateChatRequest),
-      });
-
-      const data = await response.json();
-      if (data.success) {
-        setChats([...chats, data.chat]);
-        setSelectedChat(data.chat);
-        setNewChatName('');
-        setNewChatWebhook('');
-        setIsCreateDialogOpen(false);
-      }
-    } catch (error) {
-      console.error('Erro ao criar chat:', error);
+      await createCollection(name);
+      setNewCollection('');
+      await loadCollectionsUI();
+    } catch (err: any) {
+      setWebhookError(err?.message || 'Erro ao criar coleção');
     } finally {
       setIsLoading(false);
     }
   };
+
+  const handleDeleteCollection = async (name: string) => {
+    try {
+      setIsLoading(true);
+      await deleteCollection(name);
+      await loadCollectionsUI();
+    } catch (err: any) {
+      setWebhookError(err?.message || 'Erro ao deletar coleção');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
@@ -114,8 +113,8 @@ export function ChatApp({}: ChatAppProps) {
     }
   };
 
-  const removeFile = (index: number) => {
-    setSelectedFiles([]); // Remover todos os arquivos
+  const removeFile = () => {
+    setSelectedFiles([]);
     setIsDocumentMode(false);
   };
 
@@ -137,58 +136,46 @@ export function ChatApp({}: ChatAppProps) {
   };
 
   const sendMessage = async () => {
-    if ((!newMessage.trim() && selectedFiles.length === 0) || !selectedChat) return;
+    if (!newMessage.trim() || !selectedChat) return;
 
     try {
       setIsLoading(true);
-      setWebhookError(null); // Limpar erro anterior
-      
-      console.log('Enviando mensagem com arquivos:', selectedFiles.length);
-      selectedFiles.forEach((file, index) => {
-        console.log(`Arquivo ${index + 1}:`, file.name, file.size, file.type);
-      });
-      
-      const formData = new FormData();
-      formData.append('content', newMessage);
-      selectedFiles.forEach((file, index) => {
-        formData.append(`attachments`, file);
-      });
+      setWebhookError(null);
 
-      console.log('Fazendo requisição para:', `/api/chat/${selectedChat.id}/messages`);
-      const response = await fetch(`/api/chat/${selectedChat.id}/messages`, {
-        method: 'POST',
-        body: formData,
-      });
+      const userMessage = {
+        id: `local-${Date.now()}`,
+        chatId: selectedChat.id,
+        content: newMessage,
+        sender: 'user' as const,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, userMessage]);
 
-      console.log('Status da resposta:', response.status);
-      console.log('Headers da resposta:', Object.fromEntries(response.headers.entries()));
+      const res = await sendRagMessage({
+        question: newMessage,
+        collections: ['normas', 'horarios', 'plano-curso'],
+        session_id: sessionId,
+      } as any);
 
-      const data = await response.json();
-      console.log('Dados da resposta:', data);
-      
-      if (data.success) {
-        // Recarregar todas as mensagens para garantir que temos a resposta do agente
-        await loadMessages(selectedChat.id);
-        setNewMessage('');
-        setSelectedFiles([]);
-        setIsDocumentMode(false);
-        
-        // Limpar o input de arquivo após enviar
-        if (fileInputRef.current) {
-          fileInputRef.current.value = '';
-        }
-        
-        // Mostrar feedback se foram enviados arquivos
-        if (selectedFiles.length > 0) {
-          console.log(`✅ Arquivo enviado com sucesso`);
-        }
-      } else {
-        console.error('Erro na resposta:', data.error);
-        setWebhookError(data.error || 'Erro ao enviar mensagem');
+      setSessionId(res.session_id);
+      const assistantMessage = {
+        id: res.session_id,
+        chatId: selectedChat.id,
+        content: res.answer,
+        sender: 'agent' as const,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
+
+      setNewMessage('');
+      setSelectedFiles([]);
+      setIsDocumentMode(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao enviar mensagem:', error);
-      setWebhookError('Erro ao enviar mensagem. Tente novamente.');
+      setWebhookError(error?.message || 'Erro ao enviar mensagem. Tente novamente.');
     } finally {
       setIsLoading(false);
     }
@@ -219,57 +206,42 @@ export function ChatApp({}: ChatAppProps) {
               <span>Sair</span>
             </Button>
           </div>
-          <p className="text-sm text-gray-500 mt-1">Bem-vindo Sobral!</p>
+          <p className="text-sm text-gray-500 mt-1">Olá Serginho, boa tarde!</p>
+        </div>
+
+        {/* Coleções */}
+        <div className="p-4 border-b border-gray-200">
+          <h2 className="text-lg font-medium text-gray-900 mb-2">Coleções</h2>
+          <div className="flex space-x-2 mb-3">
+            <Input
+              value={newCollection}
+              onChange={(e) => setNewCollection(e.target.value)}
+              placeholder="Nome da coleção"
+              disabled={isLoading}
+            />
+            <Button onClick={handleCreateCollection} disabled={isLoading || !newCollection.trim()}>
+              Criar
+            </Button>
+          </div>
+          <div className="space-y-2 max-h-40 overflow-y-auto">
+            {collections.map((name) => (
+              <div key={name} className="flex items-center justify-between p-2 bg-gray-50 rounded border">
+                <span className="text-sm text-gray-800 truncate">{name}</span>
+                <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700" onClick={() => handleDeleteCollection(name)}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+            {collections.length === 0 && (
+              <p className="text-xs text-gray-500">Nenhuma coleção criada.</p>
+            )}
+          </div>
         </div>
 
         {/* Chat List */}
         <div className="flex-1 overflow-y-auto p-4">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-medium text-gray-900">Agentes</h2>
-            <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" className="flex items-center space-x-2">
-                  <Plus className="h-4 w-4" />
-                  <span>Novo</span>
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Criar Novo Agente</DialogTitle>
-                  <DialogDescription>
-                    Adicione um novo agente com seu webhook do n8n
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="name">Nome do Agente</Label>
-                    <Input
-                      id="name"
-                      value={newChatName}
-                      onChange={(e) => setNewChatName(e.target.value)}
-                      placeholder="Ex: Assistente de Vendas"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="webhook">URL do Webhook</Label>
-                    <Input
-                      id="webhook"
-                      value={newChatWebhook}
-                      onChange={(e) => setNewChatWebhook(e.target.value)}
-                      placeholder="https://seu-n8n.com/webhook/..."
-                    />
-                  </div>
-                </div>
-                <DialogFooter>
-                  <Button
-                    onClick={createChat}
-                    disabled={!newChatName || !newChatWebhook || isLoading}
-                  >
-                    {isLoading ? 'Criando...' : 'Criar Agente'}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+            <h2 className="text-lg font-medium text-gray-900">Agente RAG</h2>
           </div>
 
           <div className="space-y-2">
@@ -307,7 +279,7 @@ export function ChatApp({}: ChatAppProps) {
             {/* Chat Header */}
             <div className="bg-white border-b border-gray-200 p-4">
               <h2 className="text-lg font-medium text-gray-900">{selectedChat.name}</h2>
-              <p className="text-sm text-gray-500">Webhook: {selectedChat.webhookUrl}</p>
+              <p className="text-sm text-gray-500">Endpoint: {selectedChat.webhookUrl}</p>
               {webhookError && (
                 <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded">
                   <p className="text-xs text-yellow-700">
@@ -424,7 +396,7 @@ export function ChatApp({}: ChatAppProps) {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => removeFile(index)}
+                          onClick={() => removeFile()}
                           className="text-red-500 hover:text-red-700"
                         >
                           <X className="h-3 w-3" />

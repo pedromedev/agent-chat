@@ -15,9 +15,9 @@ export default defineConfig({
     allowedHosts: ['b2bbfff54f8e.ngrok.app'],
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        target: 'http://localhost:8000',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
+        // Não reescreve o caminho: backend já expõe rotas com prefixo /api
       },
     },
   },
